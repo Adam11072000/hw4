@@ -24,8 +24,25 @@ MetaData* heapTail = NULL; // last element
 int count = 0;
 int free_blocks = 0;
 const int hist_size = 128;
+const int min_split = 128;
 const size_t one_kb = 1024; // make sure not 1000
 MetaData* free_hist[hist_size] = {nullptr};
+
+static void insertToHist(MetaData* metadata);
+
+static void split(MetaData** to_split, size_t size){
+
+    if((*to_split)->size - size < min_split){
+        return;
+    }
+
+    if((*to_split)->size > size){
+        MetaData* secondHalf = *to_split + sizeof(MetaData) + size;
+        secondHalf->size = (*to_split)->size - size;
+        insertToHist(secondHalf);
+        (*to_split)->size = size;
+    }
+}
 
 /** size is def smaller than 128kb */
 static void insertToHist(MetaData* metadata){
@@ -60,34 +77,44 @@ static void insertToHist(MetaData* metadata){
 MetaData* findFreeSpace(size_t size){
     MetaData* to_return = NULL;
     MetaData* targeted_list;
-    MetaData* it;
+    MetaData* it = NULL;
+    size_t index = -1;
 
-    for(size_t i = size; i < hist_size; i+=one_kb){
+    for(size_t i = size; i < hist_size*one_kb; i+=one_kb){
         targeted_list = free_hist[i / one_kb];
         if(targeted_list){
             it = targeted_list;
             while(it){
                 if(it->size >= size){
-                    to_return = it;
-                    if(it == targeted_list){
-                        free_hist[i / one_kb] = it->next;
-                        if(it->next){
-                            it->next->prev = NULL;
-                        }
-                        return to_return;
-                    } else{
-                        if(it->next != NULL){
-                            it->next->prev = it->prev;
-                        }
-                       it->prev->next = it->next;
-                       return to_return;
-                    }
+                    index = i;
+                    break;
                 }
                 it = it->next;
             }
         }
+        if(index != -1){
+            break;
+        }
     }
-    return NULL;
+    if(index == -1){
+        return NULL;
+    }
+    if(it == targeted_list){
+        free_hist[index / one_kb] = it->next;
+        if(it->next){
+            it->next->prev = NULL;
+        }
+    }else{
+        if(it->next != NULL){
+            it->next->prev = it->prev;
+        }
+        it->prev->next = it->next;
+    }
+
+    if(it->size > size){
+        split(&it, size);
+    }
+    return it;
 }
 
 using std::cout;
@@ -103,31 +130,37 @@ void print_hist(){
             it = it->next;
         }
     }
+    std::cout << "======================================================================================" << endl;
 }
 
 int main(){
     MetaData* m1 = new MetaData;
     m1->size = 1;
-    MetaData* m12 = new MetaData;
-    m1->size = 2;
-    MetaData* m13 = new MetaData;
-    m1->size = 3;
     MetaData* m2 = new MetaData;
-    m2->size = 1+one_kb;
+    m2->size = 2;
     MetaData* m3 = new MetaData;
-    m3->size = 1+2*one_kb;
+    m3->size = 3;
     MetaData* m4 = new MetaData;
-    m4->size = 1+3*one_kb;
+    m4->size = 1+one_kb;
+    MetaData* m5 = new MetaData;
+    m5->size = 1 + 2*one_kb;
+    MetaData* m6 = new MetaData;
+    m6->size = 1+3*one_kb;
     insertToHist(m1);
     insertToHist(m2);
     insertToHist(m3);
     insertToHist(m4);
-    insertToHist(m12);
-    insertToHist(m13);
+    insertToHist(m5);
+    insertToHist(m6);
+    print_hist();
+    MetaData* m7 = findFreeSpace(5);
+    cout << m7->size << endl;
+    print_hist();
+    MetaData* m8 = findFreeSpace(2100);
+    cout << m8->size << endl;
     print_hist();
     exit(0);
 }
-
 
 void* smalloc(size_t size){
     if(size > MAX_SIZE || size == 0){
