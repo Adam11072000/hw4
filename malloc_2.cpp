@@ -30,7 +30,7 @@ void* smalloc(size_t size){
     bool found_free_space= false;
 
     if(count == 0){
-        heapHead = (MetaData*)(sbrk(intptr_t (sizeof(MetaData) + size)));
+        heapHead = (MetaData*)(sbrk(sizeof(MetaData) + size));
         if(heapHead == (void*)(-1)){
             exit(1);
         }
@@ -39,20 +39,21 @@ void* smalloc(size_t size){
         heapHead->next = NULL;
         heapHead->is_free = false;
         heapTail = heapHead;
-        out = (void*) (heapHead+sizeof(MetaData));
+        out = heapHead + 1;
         count++;
     } else{
-        while(it != heapTail){
+        while(it){
             if(it->size >= size && it->is_free){
                 it->is_free = false;
-                out = it + sizeof(MetaData);
+                out = it + 1;
                 found_free_space = true;
                 free_blocks--;
+                break;
             }
             it = it->next;
         }
         if(!found_free_space){
-            heapTail->next = (MetaData*)(sbrk(intptr_t (sizeof(MetaData) + size)));
+            heapTail->next = (MetaData*)(sbrk(sizeof(MetaData) + size));
             if(heapTail == (void*)(-1)){
                 exit(1);
             }
@@ -61,7 +62,7 @@ void* smalloc(size_t size){
             heapTail->next = NULL;
             heapTail->size = size;
             heapTail->is_free = false;
-            out = (void*)(heapTail + sizeof(MetaData));
+            out = heapTail + 1;
             count++;
         }
     }
@@ -86,12 +87,13 @@ void sfree(void* p){
     }
     MetaData* it = heapHead;
     while(it){
-        if((void*)(it + sizeof(MetaData)) == p){
+        if(it + 1 == p && !it->is_free){
             it->is_free = true;
             p = NULL;
             free_blocks++;
             break;
         }
+        it = it->next;
     }
 }
 
@@ -103,17 +105,18 @@ void* srealloc(void* oldp, size_t size){
     int to_copy;
     if(oldp){
         was_alloc = true;
-        to_copy = size > ((MetaData*)oldp)->size ? ((MetaData*)oldp)->size : size;
+        to_copy = size > ((MetaData*)oldp-1)->size ? ((MetaData*)oldp-1)->size : size;
     }
     MetaData* it = heapHead;
     void* out;
     while(it){
-        if(oldp && (void*)(it+sizeof(MetaData)) == oldp){
+        if(oldp && (it + 1 == oldp)){
             if(it->size >= size){
                 return oldp;
             }
             // we need to find a new bigger block
             it->is_free = true;
+            free_blocks++;
             break;
         }
         it = it->next;

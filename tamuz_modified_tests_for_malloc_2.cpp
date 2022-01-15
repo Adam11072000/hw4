@@ -27,6 +27,24 @@ IMPORTANT_NOTE: I HOLD NO responsability for these tests no to their results, th
 #include <sys/wait.h>
 #include <iostream>
 
+
+//
+// Created by student on 1/13/22.
+//
+
+void* smalloc(size_t s);
+void sfree(void* p);
+void* scalloc(size_t num, size_t size);
+void* srealloc(void* oldp, size_t size);
+size_t _num_free_blocks();
+size_t _num_free_bytes();
+size_t _num_allocated_blocks();
+
+size_t _num_allocated_bytes();
+size_t _num_meta_data_bytes();
+size_t _size_meta_data();
+
+
 #define assert_state(_initial, _expected)\
 	do {\
 		assert(_num_free_blocks() - _initial.free_blocks == _expected.free_blocks); \
@@ -45,182 +63,13 @@ typedef struct {
             meta_data_bytes;
 } HeapState;
 
-size_t _num_free_blocks();
-size_t _num_free_bytes();
-size_t _num_allocated_blocks();
-size_t _num_allocated_bytes();
-size_t _num_meta_data_bytes();
-size_t _size_meta_data();
+
 void *sbrk(intptr_t);
 
 
 //
 // Created by student on 1/13/22.
 //
-#include <unistd.h>
-#include <cstring>
-#include <cmath>
-
-const long int MAX_SIZE = pow(10, 8);
-
-struct MetaData{
-    size_t size;
-    bool is_free;
-    MetaData* prev;
-    MetaData* next;
-};
-
-MetaData* heapHead = NULL;
-MetaData* heapTail = NULL; // last element
-int count = 0;
-int free_blocks = 0;
-
-
-
-void* smalloc(size_t size){
-    if(size > MAX_SIZE || size == 0){
-        return NULL;
-    }
-    void* out = NULL;
-    MetaData* it = heapHead;
-    bool found_free_space= false;
-
-    if(count == 0){
-        heapHead = (MetaData*)(sbrk(intptr_t (sizeof(MetaData) + size)));
-        if(heapHead == (void*)(-1)){
-            exit(1);
-        }
-        heapHead->size = size;
-        heapHead->prev = NULL;
-        heapHead->next = NULL;
-        heapHead->is_free = false;
-        heapTail = heapHead;
-        out = (void*) (heapHead+sizeof(MetaData));
-        count++;
-    } else{
-        while(it != heapTail){
-            if(it->size >= size && it->is_free){
-                it->is_free = false;
-                out = it + sizeof(MetaData);
-                found_free_space = true;
-                free_blocks--;
-            }
-            it = it->next;
-        }
-        if(!found_free_space){
-            heapTail->next = (MetaData*)(sbrk(intptr_t (sizeof(MetaData) + size)));
-            if(heapTail == (void*)(-1)){
-                exit(1);
-            }
-            heapTail->next->prev = heapTail;
-            heapTail = heapTail->next;
-            heapTail->next = NULL;
-            heapTail->size = size;
-            heapTail->is_free = false;
-            out = (void*)(heapTail + sizeof(MetaData));
-            count++;
-        }
-    }
-    return out;
-}
-
-void* scalloc(size_t num, size_t size){
-    if(size == 0 || size*num > MAX_SIZE){
-        return NULL;
-    }
-    void* out = smalloc(size*num);
-    if(out == NULL){
-        return NULL;
-    }
-    std::memset(out,0, size*num); // check ascii
-    return out;
-}
-
-void sfree(void* p){
-    if(p == NULL){
-        return;
-    }
-    MetaData* it = heapHead;
-    while(it){
-        if((void*)(it + sizeof(MetaData)) == p){
-            it->is_free = true;
-            p = NULL;
-            free_blocks++;
-            break;
-        }
-    }
-}
-
-void* srealloc(void* oldp, size_t size){
-    if(size == 0 or size > MAX_SIZE){
-        return NULL;
-    }
-    bool was_alloc = false;
-    int to_copy;
-    if(oldp){
-        was_alloc = true;
-        to_copy = size > ((MetaData*)oldp)->size ? ((MetaData*)oldp)->size : size;
-    }
-    MetaData* it = heapHead;
-    void* out;
-    while(it){
-        if(oldp && (void*)(it+sizeof(MetaData)) == oldp){
-            if(it->size >= size){
-                return oldp;
-            }
-            // we need to find a new bigger block
-            it->is_free = true;
-            break;
-        }
-        it = it->next;
-    }
-    out = smalloc(size);
-    if(out == NULL){
-        return NULL;
-    }
-    if(was_alloc) {
-        memcpy(out, oldp, to_copy);
-    }
-    return out;
-}
-
-size_t _num_free_blocks(){
-    return free_blocks;
-}
-
-size_t _num_free_bytes(){
-    MetaData* it = heapHead;
-    size_t res = 0;
-    while(it){
-        if(it->is_free){
-            res += it->size;
-        }
-        it = it->next;
-    }
-    return res;
-}
-
-size_t _num_allocated_blocks(){
-    return count;
-}
-
-size_t _num_allocated_bytes(){
-    MetaData* it = heapHead;
-    size_t res = 0;
-    while(it){
-        res += it->size;
-        it = it->next;
-    }
-    return res;
-}
-
-size_t _num_meta_data_bytes(){
-    return sizeof(MetaData)*count;
-}
-
-size_t _size_meta_data(){
-    return sizeof(MetaData);
-}
 
 
 /*******************************************************************************
@@ -407,7 +256,11 @@ void test_reuse_after_free() {
             *(p[i]+j) = DATA[i][j];
         }
     }
-    assert_state(initial, expected);
+    assert(_num_free_blocks() - initial.free_blocks == expected.free_blocks); \
+		assert(_num_free_bytes() - initial.free_bytes == expected.free_bytes); \
+		assert(_num_allocated_blocks() - initial.allocated_blocks == expected.allocated_blocks); \
+		assert(_num_allocated_bytes() - initial.allocated_bytes == expected.allocated_bytes); \
+		assert(_num_meta_data_bytes() - initial.meta_data_bytes == expected.meta_data_bytes); \
     assert(check_data(heap, DATA, 4, BLOCK_SIZES));
 
     /* free blocks 0, 1, 3: */
