@@ -264,34 +264,34 @@ void print_hist(){
     std::cout << "======================================================================================" << endl;
 }
 
-int main(){
-    MetaData* m1 = new MetaData;
-    m1->size = 1;
-    MetaData* m2 = new MetaData;
-    m2->size = 2;
-    MetaData* m3 = new MetaData;
-    m3->size = 3;
-    MetaData* m4 = new MetaData;
-    m4->size = 1+one_kb;
-    MetaData* m5 = new MetaData;
-    m5->size = 1 + 2*one_kb;
-    MetaData* m6 = new MetaData;
-    m6->size = 1+3*one_kb;
-    insertToHist(m1);
-    insertToHist(m2);
-    insertToHist(m3);
-    insertToHist(m4);
-    insertToHist(m5);
-    insertToHist(m6);
-    print_hist();
-    MetaData* m7 = findFreeSpace(5);
-    cout << m7->size << endl;
-    print_hist();
-    MetaData* m8 = findFreeSpace(2100);
-    cout << m8->size << endl;
-    print_hist();
-    exit(0);
-}
+//int main(){
+//    MetaData* m1 = new MetaData;
+//    m1->size = 1;
+//    MetaData* m2 = new MetaData;
+//    m2->size = 2;
+//    MetaData* m3 = new MetaData;
+//    m3->size = 3;
+//    MetaData* m4 = new MetaData;
+//    m4->size = 1+one_kb;
+//    MetaData* m5 = new MetaData;
+//    m5->size = 1 + 2*one_kb;
+//    MetaData* m6 = new MetaData;
+//    m6->size = 1+3*one_kb;
+//    insertToHist(m1);
+//    insertToHist(m2);
+//    insertToHist(m3);
+//    insertToHist(m4);
+//    insertToHist(m5);
+//    insertToHist(m6);
+//    print_hist();
+//    MetaData* m7 = findFreeSpace(5);
+//    cout << m7->size << endl;
+//    print_hist();
+//    MetaData* m8 = findFreeSpace(2100);
+//    cout << m8->size << endl;
+//    print_hist();
+//    exit(0);
+//}
 
 static void insertToAllocatedList(MetaData* to_insert){
     MetaData* it = heapHead;
