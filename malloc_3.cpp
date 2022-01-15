@@ -22,6 +22,14 @@ struct MetaData{
     MetaData* next;
 };
 
+typedef enum merge_t{
+    NO_MERGE,
+    MERGE_LOWER,
+    MERGE_HIGHER,
+    MERGE_BOTH,
+    FREE_MERGE
+}MergeOptions;
+
 MetaData* heapHead = NULL;
 MetaData* heapTail = NULL; // last element
 int count = 0;
@@ -78,14 +86,13 @@ static void insertToHist(MetaData* metadata){
         free_hist[metadata->size / one_kb] = metadata;
         metadata->next = NULL;
         metadata->prev = NULL;
-        mergeAdjacent(metadata);
         return;
     }
     if(it > metadata){
         metadata->next = it;
         it->prev = metadata;
+        metadata->prev = NULL;
         free_hist[metadata->size / one_kb] = metadata;
-        mergeAdjacent(metadata);
         return;
     }
     while(it && it < metadata){
@@ -98,7 +105,6 @@ static void insertToHist(MetaData* metadata){
     metadata->prev = prev;
     prev->next = metadata;
     metadata->next = it;
-    mergeAdjacent(metadata);
 }
 
 /** get the first empty space, return null if none is found */
@@ -188,28 +194,59 @@ static MetaData* removeFreeBlock(MetaData* target){
     return NULL;
 }
 
-void mergeAdjacent(MetaData* target){
+static void mergeLower(MetaData* target, MetaData* lower){
+    removeFreeBlock(lower);
+    removeFreeBlock(target);
+    lower->size = lower->size + target->size;
+    insertToHist(lower);
+}
+
+static void mergeHigher(MetaData* target, MetaData* upper){
+    removeFreeBlock(target);
+    removeFreeBlock(upper);
+    target->size = target->size + upper->size;
+    insertToHist(target);
+}
+
+static void mergeBoth(MetaData* target, MetaData* lower, MetaData* upper){
+    removeFreeBlock(lower);
+    removeFreeBlock(target);
+    removeFreeBlock(upper);
+    lower->size = lower->size + target->size + upper->size;
+    insertToHist(lower);
+}
+
+static void mergeAdjacent(MetaData* target){
     MetaData* upper = NULL;
     MetaData* lower = findAdjacentBlocks(target, &upper);
+
     if(!lower && !upper){
         return;
     } else if(lower && !upper){
-        removeFreeBlock(lower);
-        removeFreeBlock(target);
-        lower->size = lower->size + target->size;
-        insertToHist(lower);
+        mergeLower(target, lower);
     } else if(!lower && upper){
-        removeFreeBlock(target);
-        removeFreeBlock(upper);
-        target->size = target->size + upper->size;
-        insertToHist(target);
+        mergeHigher(target, upper);
     } else{
-        removeFreeBlock(lower);
-        removeFreeBlock(target);
-        removeFreeBlock(upper);
-        lower->size = lower->size + target->size + upper->size;
-        insertToHist(lower);
+        mergeBoth(target, lower, upper);
     }
+}
+
+static MetaData* mergeAdjacentByPriority(MetaData* target, size_t new_size){
+    MetaData* upper = NULL;
+    MetaData* lower = findAdjacentBlocks(target, &upper);
+    if(lower && target->size + lower->size >= new_size){
+        mergeLower(target, lower);
+        return lower;
+    }
+    if(upper && target->size + upper->size >= new_size){
+          mergeHigher(target, upper);
+          return target;
+    }
+    if(lower && upper && target->size + upper->size + lower->size >= new_size){
+        mergeBoth(target,lower,upper);
+        return lower;
+    }
+    return NULL;
 }
 
 
@@ -287,8 +324,6 @@ static void insertToAllocatedList(MetaData* to_insert){
     to_insert->prev->next = to_insert;
 }
 
-
-
 void* smalloc(size_t size){
     if(size > MAX_SIZE || size == 0){
         return NULL;
@@ -302,16 +337,16 @@ void* smalloc(size_t size){
             if (out == (void *) (-1)) {
                 exit(1);
             }
+            count++;
             insertToAllocatedList(out);
         }else{
             out = (MetaData*) sbrk(size - out->size);
             if(out == (void*)(-1)){
                 return NULL;
             }
-            out->size = size;
             insertToAllocatedList(out);
         }
-
+        out->size = size;
     }else{
         insertToAllocatedList(out);
     }
@@ -330,18 +365,51 @@ void* scalloc(size_t num, size_t size){
     return out;
 }
 
-void sfree(void* p){
-    if(p == NULL){
-        return;
-    }
+/**target is a user pointer*/
+MetaData* removeFromAllocatedList(void* target){
     MetaData* it = heapHead;
     while(it){
-        if((void*)(it + sizeof(MetaData)) == p){
-            it->is_free = true;
-            p = NULL;
-            free_blocks++;
+        if(it + sizeof(MetaData) == target){
             break;
         }
+        it = it->next;
+    }
+    if(!it){
+        return NULL;
+    }
+    if(it == heapHead){
+        if(heapHead == heapTail){
+            heapHead = NULL;
+            heapTail = NULL;
+        }else{
+            heapHead = it->next;
+            it->next->prev = NULL;
+        }
+        return it;
+    }
+    if(it == heapTail){
+        heapTail = it->prev;
+        heapTail->next = NULL;
+        return it;
+    }
+    if(it->prev){
+        it->prev->next = it->next;
+    }
+    if(it->next){
+        it->next->prev = it->prev;
+    }
+    return it;
+}
+
+void sfree(void* p) {
+    if (p == NULL) {
+        return;
+    }
+    MetaData* to_insert = removeFromAllocatedList(p);
+    if(to_insert) {
+        insertToHist(to_insert);
+        mergeAdjacent(to_insert);
+        free_blocks++;
     }
 }
 
@@ -349,23 +417,43 @@ void* srealloc(void* oldp, size_t size){
     if(size == 0 or size > MAX_SIZE){
         return NULL;
     }
-    MetaData* it = heapHead;
     void* out;
-    while(it){
-        if((void*)(it+sizeof(MetaData)) == oldp){
-            if(it->size >= size){
-                return oldp;
+    bool was_alloc = false;
+    size_t to_copy;
+    if(oldp){
+        to_copy = size > ((MetaData*)oldp)->size ? ((MetaData*)oldp)->size : size;
+        was_alloc = true;
+        MetaData* it = heapHead;
+        // try to use curr block
+        while(it){
+            if((void*)(it+sizeof(MetaData)) == oldp){
+                if(it->size >= size){
+                    split(&it, size);
+                    return oldp;
+                }
+                it->is_free = true;
+                break;
             }
-            it->is_free = true;
-            break;
+            it = it->next;
         }
-        it = it->next;
+
+        removeFromAllocatedList(oldp);
+        out = mergeAdjacentByPriority(((MetaData*)oldp), size);
+        if(out){
+            removeFreeBlock((MetaData*) out);
+            memcpy((MetaData*)out+sizeof(MetaData), oldp, to_copy);
+            insertToAllocatedList((MetaData*)out);
+            return ((void*)((MetaData*)out + sizeof(MetaData)));
+        }
     }
+
     out = smalloc(size);
     if(out == NULL){
         return NULL;
     }
-    memcpy(out, oldp, size);
+    if(was_alloc) {
+        memcpy(out, oldp, to_copy);
+    }
     return out;
 }
 

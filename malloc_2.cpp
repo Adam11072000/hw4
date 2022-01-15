@@ -40,6 +40,7 @@ void* smalloc(size_t size){
         heapHead->is_free = false;
         heapTail = heapHead;
         out = (void*) (heapHead+sizeof(MetaData));
+        count++;
     } else{
         while(it != heapTail){
             if(it->size >= size && it->is_free){
@@ -61,9 +62,9 @@ void* smalloc(size_t size){
             heapTail->size = size;
             heapTail->is_free = false;
             out = (void*)(heapTail + sizeof(MetaData));
+            count++;
         }
     }
-    count++;
     return out;
 }
 
@@ -98,13 +99,20 @@ void* srealloc(void* oldp, size_t size){
     if(size == 0 or size > MAX_SIZE){
         return NULL;
     }
+    bool was_alloc = false;
+    int to_copy;
+    if(oldp){
+        was_alloc = true;
+        to_copy = size > ((MetaData*)oldp)->size ? ((MetaData*)oldp)->size : size;
+    }
     MetaData* it = heapHead;
     void* out;
     while(it){
-        if((void*)(it+sizeof(MetaData)) == oldp){
+        if(oldp && (void*)(it+sizeof(MetaData)) == oldp){
             if(it->size >= size){
                 return oldp;
             }
+            // we need to find a new bigger block
             it->is_free = true;
             break;
         }
@@ -114,7 +122,9 @@ void* srealloc(void* oldp, size_t size){
     if(out == NULL){
         return NULL;
     }
-    memcpy(out, oldp, size);
+    if(was_alloc) {
+        memcpy(out, oldp, to_copy);
+    }
     return out;
 }
 
