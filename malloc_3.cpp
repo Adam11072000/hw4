@@ -16,6 +16,7 @@ struct MetaData{
     size_t size;
     MetaData* prev;
     MetaData* next;
+    bool is_free;
 };
 
 
@@ -83,6 +84,7 @@ static void split(MetaData** to_split, size_t size){
         secondHalf += 1;
         incVoidPtr((void*)secondHalf, size);
         secondHalf->size = (*to_split)->size - size;
+        secondHalf->is_free = true;
         insertToHist(secondHalf);
         (*to_split)->size = size;
     }
@@ -354,6 +356,7 @@ void* smalloc(size_t size){
             return NULL;
         }
         out->size = size;
+        out->is_free = false;
         insertToMapped(out);
         return out + 1;
     }
@@ -380,6 +383,7 @@ void* smalloc(size_t size){
         insertToAllocatedList(out);
     }
     out = out + 1;
+    out->is_free = false;
     return (void*)out;
 }
 
@@ -474,13 +478,13 @@ void sfree(void* p) {
     if(((MetaData*)p-1)->size < threshold) {
         MetaData *to_insert = removeFromAllocatedList(p);
         if (to_insert) {
+            to_insert->is_free = true;
             insertToHist(to_insert);
             mergeAdjacent(to_insert);
         }
     }else{
         removeFromMapped(p);
         munmap(((MetaData*)p-1), ((MetaData*)p-1)->size + sizeof(MetaData));
-
     }
 }
 
@@ -525,6 +529,7 @@ void* srealloc(void* oldp, size_t size){
             removeFreeBlock((MetaData*) out);
             memcpy((MetaData*)out+1, oldp, to_copy);
             insertToAllocatedList((MetaData*)out);
+            ((MetaData*)out)->is_free = false;
             return incVoidPtr(out, sizeof(MetaData));
         }
     }

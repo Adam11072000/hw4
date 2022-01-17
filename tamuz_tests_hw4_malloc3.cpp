@@ -11,8 +11,17 @@ export LD_LIBRARY_PATH="/root/hw4/"
 #include <sys/wait.h>
 #include <iostream>
 
-using std::cout;
-using std::endl;
+void* smalloc(size_t size);
+void* scalloc(size_t num, size_t size);
+void sfree(void* p);
+void* srealloc(void* oldp, size_t size);
+size_t _num_free_blocks();
+size_t _num_free_bytes();
+size_t _num_allocated_blocks();
+size_t _num_allocated_bytes();
+size_t _num_meta_data_bytes();
+size_t _size_meta_data();
+
 
 #define assert_state(_initial, _expected)\
 	do {\
@@ -31,14 +40,10 @@ typedef struct {
 	size_t free_blocks, free_bytes, allocated_blocks, allocated_bytes,
 			meta_data_bytes;
 } HeapState;
-void* smalloc(size_t s);
-void sfree(void* p);
-void* scalloc(size_t num, size_t size);
-void* srealloc(void* oldp, size_t size);
+
 size_t _num_free_blocks();
 size_t _num_free_bytes();
 size_t _num_allocated_blocks();
-
 size_t _num_allocated_bytes();
 size_t _num_meta_data_bytes();
 size_t _size_meta_data();
@@ -56,7 +61,7 @@ void get_initial_state(HeapState &initial) {
 }
 
 size_t round(size_t size) {
-	return size;
+	return ((size-1)/4+1)*4;
 }
 
 /* Tells the test-function that we're expecting a new block to be allocated on
@@ -136,14 +141,14 @@ void test_basic_malloc_and_free() {
 	HeapState initial, expected = {0,0,0,0,0};
 	get_initial_state(initial);
 
-	byte DATA[] = {1, META, 2,3,4,5,META,
-				6,7,8,9,10};
+	byte DATA[] = {1,GARBAGE,GARBAGE,GARBAGE,META, 2,3,4,5,META,
+				6,7,8,9,10,GARBAGE,GARBAGE,GARBAGE};
 
 	byte *p1,*p2,*p3;
 	p1 = malloc_byte(1);
 	add_expected_block(expected, 1);
 	assert_state(initial, expected);
-    p2 = malloc_byte(4);
+	p2 = malloc_byte(4);
 	add_expected_block(expected, 4);
 	assert_state(initial, expected);
 	p3 = malloc_byte(5);
@@ -154,20 +159,20 @@ void test_basic_malloc_and_free() {
 	p2[0]=2;p2[1]=3;p2[2]=4;p2[3]=5;
 	p3[0]=6;p3[1]=7;p3[2]=8;p3[3]=9;p3[4]=10;
 	assert_state(initial, expected);
-	assert(check_heap_straight(heap, DATA, 12));
+	assert(check_heap_straight(heap, DATA, 18));
 
 	sfree(p1);
 	free_expected_block(expected, 1);
 	assert_state(initial, expected);
 	DATA[0] = GARBAGE;
-	assert(check_heap_straight(heap, DATA, 12));
+	assert(check_heap_straight(heap, DATA, 18));
 
 	sfree(p2);
 	free_expected_block(expected, 4);
 	merge_expected_block(expected);
 	assert_state(initial, expected);
 	DATA[5]=GARBAGE; DATA[6]=GARBAGE; DATA[7]=GARBAGE; DATA[8]=GARBAGE;
-	assert(check_heap_straight(heap, DATA, 12));
+	assert(check_heap_straight(heap, DATA, 18));
 
 	sfree(p3);
 	free_expected_block(expected, 5);
@@ -548,19 +553,19 @@ void test_failures() {
 /*******************************************************************************
  *  MAIN
  ******************************************************************************/
-//
-//void align() {
-//	void *heap = sbrk(0);
-//	int inc = (int)(heap) % 4;
-//	void *result;
-//	if (inc) {
-//		result = sbrk(inc);
-//		if (result == (void*)-1) {
-//			std::cout << "can't test, failed to align heap base" << std::endl;
-//			exit(1);
-//		}
-//	}
-//}
+
+void align() {
+	void *heap = sbrk(0);
+	int inc = (int)(heap) % 4;
+	void *result;
+	if (inc) {
+		result = sbrk(inc);
+		if (result == (void*)-1) {
+			std::cout << "can't test, failed to align heap base" << std::endl;
+			exit(1);
+		}
+	}
+}
 
 static void callTestFunction(void (*func)()) {
 //	if (!fork()) {  // test as son, to get a clear heap
@@ -582,27 +587,27 @@ static void callTestFunction(void (*func)()) {
 
 int main()
 {
-	//align();
+	align();
 	std::cout << "test_basic_malloc_and_free" << std::endl;
 	callTestFunction(test_basic_malloc_and_free);
-//	std::cout << "test_malloc_wilderness" << std::endl;
-//	callTestFunction(test_malloc_wilderness);
-//	std::cout << "test_calloc" << std::endl;
-//	callTestFunction(test_calloc);
-//	std::cout << "test_malloc_split_and_merge" << std::endl;
-//	callTestFunction(test_malloc_split_and_merge);
-//	std::cout << "test_realloc_just_contract" << std::endl;
-//	callTestFunction(test_realloc_just_contract);
-//	std::cout << "test_realloc_split_then_merge" << std::endl;
-//	callTestFunction(test_realloc_split_then_merge);
-//	std::cout << "test_realloc_merge_then_split" << std::endl;
-//	callTestFunction(test_realloc_merge_then_split);
-//	std::cout << "test_realloc_on_wilderness" << std::endl;
-//	callTestFunction(test_realloc_on_wilderness);
-//	std::cout << "test_realloc_copy_to_wilderness" << std::endl;
-//	callTestFunction(test_realloc_copy_to_wilderness);
-//	std::cout << "test_failures" << std::endl;
-//	callTestFunction(test_failures);
-//	std::cout << "Done." << std::endl;
+	std::cout << "test_malloc_wilderness" << std::endl;
+	callTestFunction(test_malloc_wilderness);
+	std::cout << "test_calloc" << std::endl;
+	callTestFunction(test_calloc);
+	std::cout << "test_malloc_split_and_merge" << std::endl;
+	callTestFunction(test_malloc_split_and_merge);
+	std::cout << "test_realloc_just_contract" << std::endl;
+	callTestFunction(test_realloc_just_contract);
+	std::cout << "test_realloc_split_then_merge" << std::endl;
+	callTestFunction(test_realloc_split_then_merge);
+	std::cout << "test_realloc_merge_then_split" << std::endl;
+	callTestFunction(test_realloc_merge_then_split);
+	std::cout << "test_realloc_on_wilderness" << std::endl;
+	callTestFunction(test_realloc_on_wilderness);
+	std::cout << "test_realloc_copy_to_wilderness" << std::endl;
+	callTestFunction(test_realloc_copy_to_wilderness);
+	std::cout << "test_failures" << std::endl;
+	callTestFunction(test_failures);
+	std::cout << "Done." << std::endl;
 	return 0;
 }
