@@ -17,6 +17,8 @@ struct MetaData{
     MetaData* prev;
     MetaData* next;
     bool is_free;
+    MetaData* next_free;
+    MetaData* prev_free;
 };
 
 
@@ -39,7 +41,7 @@ static void mergeAdjacent(MetaData* target);
 static MetaData* checkWilderness();
 static void insertToAllocatedList(MetaData* to_insert);
 static void insertToMapped(MetaData* to_insert);
-
+static void print_memory_list();
 
 static void* incVoidPtr(void* ptr, long int bytes){
     long int to_move = bytes > 0 ? 1 : -1;
@@ -62,12 +64,12 @@ static MetaData* checkWilderness() {
         while(it){
             tmp = it;
             tmp += 1;
-            incVoidPtr((void*)tmp, it->size);
-            if(tmp == (void*)sbrk(0)){
+            tmp = (MetaData*)incVoidPtr((void*)tmp, it->size);
+            if(tmp == sbrk(0)){
                 removeFreeBlock(it);
                 return it;
             }
-            it = it->next;
+            it = it->next_free;
         }
     }
     return NULL;
@@ -82,7 +84,7 @@ static void split(MetaData** to_split, size_t size){
     if((*to_split)->size > size){
         MetaData* secondHalf = *to_split;
         secondHalf += 1;
-        incVoidPtr((void*)secondHalf, size);
+        secondHalf = (MetaData*)incVoidPtr((void*)secondHalf, size);
         secondHalf->size = (*to_split)->size - size;
         secondHalf->is_free = true;
         insertToHist(secondHalf);
@@ -97,27 +99,27 @@ static void insertToHist(MetaData* metadata){
 
     if(!it){
         free_hist[metadata->size / one_kb] = metadata;
-        metadata->next = NULL;
-        metadata->prev = NULL;
+        metadata->next_free = NULL;
+        metadata->prev_free = NULL;
         return;
     }
     if(it > metadata){
-        metadata->next = it;
-        it->prev = metadata;
-        metadata->prev = NULL;
+        metadata->next_free = it;
+        it->prev_free = metadata;
+        metadata->prev_free = NULL;
         free_hist[metadata->size / one_kb] = metadata;
         return;
     }
     while(it && it < metadata){
         prev = it;
-        it = it->next;
+        it = it->next_free;
     }
     if(it != NULL){ // if here then it >= metadata
-        it->prev = metadata;
+        it->prev_free = metadata;
     }
-    metadata->prev = prev;
-    prev->next = metadata;
-    metadata->next = it;
+    metadata->prev_free = prev;
+    prev->next_free = metadata;
+    metadata->next_free = it;
 }
 
 /** get the first empty space, return null if none is found */
@@ -134,22 +136,22 @@ static MetaData* findFreeSpace(size_t size){
                 index = i;
                 break; // we won't find a lower address block
             }
-            it = it->next;
+            it = it->next_free;
         }
     }
     if(min == NULL){
         return NULL;
     }
     if(min == free_hist[index / one_kb]){
-        free_hist[index / one_kb] = min->next;
-        if(min->next){
-            min->next->prev = NULL;
+        free_hist[index / one_kb] = min->next_free;
+        if(min->next_free){
+            min->next_free->prev_free = NULL;
         }
     }else{
-        if(min->next != NULL){
-            min->next->prev = min->prev;
+        if(min->next_free != NULL){
+            min->next_free->prev_free = min->prev_free;
         }
-        min->prev->next = min->next;
+        min->prev_free->next_free = min->next_free;
     }
     if(min->size > size){
         split(&min, size);
@@ -177,7 +179,7 @@ static MetaData* findAdjacentBlocks(MetaData* target_block, MetaData** to_return
             if(tmp == it) {
                 *to_return_upper = it;
             }
-            it = it->next;
+            it = it->next_free;
         }
     }
     return to_return_lower;
@@ -191,23 +193,23 @@ static MetaData* removeFreeBlock(MetaData* target){
         // check if list head
         it = free_hist[i];
         if(it == target){
-            free_hist[i] = it->next;
-            if(it->next){
-                it->next->prev = NULL;
+            free_hist[i] = it->next_free;
+            if(it->next_free){
+                it->next_free->prev_free = NULL;
             }
             return it;
         }
         // def not list head
-        it = it->next;
+        it = it->next_free;
         while(it){
             if(it == target){
-                it->prev->next = it->next;
-                if(it->next){
-                    it->next->prev = it->prev;
+                it->prev_free->next_free = it->next_free;
+                if(it->next_free){
+                    it->next_free->prev_free = it->prev_free;
                 }
                 return it;
             }
-            it = it->next;
+            it = it->next_free;
         }
     }
     return NULL;
@@ -277,7 +279,7 @@ void print_hist(){
         }
         while(it){
             std::cout << it->size << endl;
-            it = it->next;
+            it = it->next_free;
         }
     }
     std::cout << "======================================================================================" << endl;
@@ -285,33 +287,21 @@ void print_hist(){
 
 static void insertToAllocatedList(MetaData* to_insert){
     MetaData* it = heapHead;
-
-    if(!it){
-        to_insert->next = NULL;
-        to_insert->prev = NULL;
-        heapHead = to_insert;
-        heapTail = to_insert;
-        return;
-    }
-    if(to_insert < it){
-        to_insert->next = heapHead;
-        heapHead->prev = to_insert;
-        heapHead = to_insert;
-        return;
-    }
+    to_insert->next_free = NULL;
+    to_insert->prev_free = NULL;
+    to_insert->next = NULL;
+    to_insert->prev = NULL;
     while(it && it < to_insert){
         it = it->next;
     }
-    if(!it){
-        heapTail->next = to_insert;
-        to_insert->prev = heapTail;
-        heapTail = to_insert;
+    if(!heapHead){
+        heapHead = to_insert;
+        heapTail = heapHead;
         return;
     }
-    to_insert->prev = it->prev;
-    to_insert->next = it;
-    it->prev = to_insert;
-    to_insert->prev->next = to_insert;
+    heapTail->next = to_insert;
+    to_insert->prev = heapTail;
+    heapTail = to_insert;
 }
 
 static void insertToMapped(MetaData* to_insert){
@@ -372,18 +362,15 @@ void* smalloc(size_t size){
             }
             insertToAllocatedList(out);
         }else{
-            out = (MetaData*) sbrk(size - out->size);
-            if(out == (void*)(-1)){
+            void* tmp = sbrk(size - out->size);
+            if(tmp == (void*)(-1)){
                 return NULL;
             }
-            insertToAllocatedList(out);
         }
         out->size = size;
-    }else{
-        insertToAllocatedList(out);
     }
-    out = out + 1;
     out->is_free = false;
+    out = out + 1;
     return (void*)out;
 }
 
@@ -436,37 +423,13 @@ MetaData* removeFromMapped(void* target){
 }
 
 /**target is a user pointer*/
-MetaData* removeFromAllocatedList(void* target){
+MetaData* getFromAllocatedList(void* target){
     MetaData* it = heapHead;
-    while(it){
-        if(it + 1 == target){
+    while(it) {
+        if (it + 1 == target) {
             break;
         }
         it = it->next;
-    }
-    if(!it){
-        return NULL;
-    }
-    if(it == heapHead){
-        if(heapHead == heapTail){
-            heapHead = NULL;
-            heapTail = NULL;
-        }else{
-            heapHead = it->next;
-            it->next->prev = NULL;
-        }
-        return it;
-    }
-    if(it == heapTail){
-        heapTail = it->prev;
-        heapTail->next = NULL;
-        return it;
-    }
-    if(it->prev){
-        it->prev->next = it->next;
-    }
-    if(it->next){
-        it->next->prev = it->prev;
     }
     return it;
 }
@@ -476,7 +439,7 @@ void sfree(void* p) {
         return;
     }
     if(((MetaData*)p-1)->size < threshold) {
-        MetaData *to_insert = removeFromAllocatedList(p);
+        MetaData *to_insert = getFromAllocatedList(p);
         if (to_insert) {
             to_insert->is_free = true;
             insertToHist(to_insert);
@@ -523,12 +486,10 @@ void* srealloc(void* oldp, size_t size){
             }
             it = it->next;
         }
-        removeFromAllocatedList((MetaData*)oldp-1);
         out = mergeAdjacentByPriority(((MetaData*)oldp-1), size);
         if(out){
             removeFreeBlock((MetaData*) out);
             memcpy((MetaData*)out+1, oldp, to_copy);
-            insertToAllocatedList((MetaData*)out);
             ((MetaData*)out)->is_free = false;
             return incVoidPtr(out, sizeof(MetaData));
         }
@@ -552,7 +513,7 @@ size_t _num_free_blocks(){
         it = free_hist[i];
         while(it){
             res++;
-            it = it->next;
+            it = it->next_free;
         }
     }
     return res;
@@ -566,7 +527,7 @@ size_t _num_free_bytes(){
         it = free_hist[i];
         while(it){
             res += it->size;
-            it = it->next;
+            it = it->next_free;
         }
     }
     return res;
@@ -575,7 +536,6 @@ size_t _num_free_bytes(){
 size_t _num_allocated_blocks(){
     MetaData* it = heapHead;
     size_t res = 0;
-
     while(it){
         res++;
         it = it->next;
@@ -585,7 +545,7 @@ size_t _num_allocated_blocks(){
         res++;
         it = it->next;
     }
-    return res + _num_free_blocks();
+    return res;
 }
 
 size_t _num_allocated_bytes(){
@@ -600,7 +560,6 @@ size_t _num_allocated_bytes(){
         res += it->size;
         it = it->next;
     }
-    res += _num_free_bytes();
     return res;
 }
 
@@ -610,4 +569,13 @@ size_t _num_meta_data_bytes(){
 
 size_t _size_meta_data(){
     return sizeof(MetaData);
+}
+
+void print_memory_list(){
+    MetaData* it = heapHead;
+    while(it){
+        cout << "address: " << it <<endl;
+        cout << "size: " << it->size << endl;
+        it = it->next;
+    }
 }
