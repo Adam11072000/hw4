@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iostream>
 #include <sys/mman.h>
+#include <cassert>
 
 using std::cout;
 using std::endl;
@@ -37,7 +38,7 @@ MetaData* free_hist[hist_size] = {nullptr};
 static MetaData* removeFreeBlock(MetaData* target);
 static void insertToHist(MetaData* metadata);
 static MetaData* findAdjacentBlocks(MetaData* target_block, MetaData** to_return_upper);
-static void mergeAdjacent(MetaData* target);
+static MetaData* mergeAdjacent(MetaData* target);
 static MetaData* checkWilderness();
 static void insertToAllocatedList(MetaData* to_insert);
 static void insertToMapped(MetaData* to_insert);
@@ -97,9 +98,7 @@ static MetaData* checkWilderness() {
     for(int i = 0; i < hist_size; i++){
         it = free_hist[i];
         while(it){
-            tmp = it;
-            tmp += 1;
-            tmp = (MetaData*)incVoidPtr((void*)tmp, it->size);
+            tmp = (MetaData*)incVoidPtr((void*)it, it->size + sizeof(MetaData));
             if(tmp == sbrk(0)){
                 removeFreeBlock(it);
                 return it;
@@ -119,13 +118,13 @@ static MetaData* split(MetaData* to_split, size_t size) {
     if (to_split->size > size) {
         removeFreeBlock(to_split);
         int old_size = to_split->size;
-        MetaData *secondHalf = (MetaData *) incVoidPtr((void *)to_split, size);
+        MetaData *secondHalf = (MetaData *) incVoidPtr((void *)to_split, size + sizeof(MetaData));
         secondHalf->size = old_size - size - sizeof(MetaData);
         to_split->is_free = false;
         to_split->size = size;
         secondHalf->is_free = true;
-        insertToHist(secondHalf);
         insertToAllocatedList(secondHalf);
+        insertToHist(secondHalf);
     }
     return to_split;
 }
@@ -205,24 +204,12 @@ static MetaData* findAdjacentBlocks(MetaData* target_block, MetaData** to_return
     MetaData* it;
     MetaData* to_return_lower = NULL;
     *to_return_upper = NULL;
-    MetaData* tmp;
 
-    for(int i = 0; i < hist_size; i++){
-        it = free_hist[i];
-        while(it){
-            tmp = target_block;
-            tmp = (MetaData*)incVoidPtr(tmp, (long int)(-it->size));
-            tmp = tmp-1;
-            if(tmp == it){
-                to_return_lower = it;
-            }
-            tmp = target_block + 1;
-            tmp = (MetaData*) incVoidPtr(tmp, it->size);
-            if(tmp == it) {
-                *to_return_upper = it;
-            }
-            it = it->next_free;
-        }
+    if(target_block->prev && target_block->prev->is_free){
+        to_return_lower = target_block->prev;
+    }
+    if(target_block->next && target_block->next->is_free){
+        *to_return_upper = target_block->next;
     }
     return to_return_lower;
 }
@@ -285,18 +272,21 @@ static void mergeBoth(MetaData* target, MetaData* lower, MetaData* upper){
     insertToHist(lower);
 }
 
-static void mergeAdjacent(MetaData* target){
+static MetaData* mergeAdjacent(MetaData* target){
     MetaData* upper = NULL;
     MetaData* lower = findAdjacentBlocks(target, &upper);
 
     if(!lower && !upper){
-        return;
+        return target;
     } else if(lower && !upper){
         mergeLower(target, lower);
+        return lower;
     } else if(!lower && upper){
         mergeHigher(target, upper);
+        return target;
     } else{
         mergeBoth(target, lower, upper);
+        return lower;
     }
 }
 
@@ -413,6 +403,7 @@ void* smalloc(size_t size){
         insertToMapped(out);
         return out + 1;
     }
+
 
     out = findFreeSpace(size);
 
@@ -537,22 +528,12 @@ void* srealloc(void* oldp, size_t size){
     if(oldp){
         to_copy = size > ((MetaData*)oldp-1)->size ? ((MetaData*)oldp-1)->size : size;
         was_alloc = true;
-        MetaData* it = heapHead;
-        // try to use curr block
-        while(it){
-            if(it + 1 == oldp){
-                if(it->size < size){
-                    it->is_free = true;
-                    insertToHist(it);
-                }
-                else{
-                    it = split(it, size);
-                    return it +1;
-                }
-                break;
-            }
-            it = it->next;
+        MetaData* curr = (MetaData*)incVoidPtr(oldp, -sizeof(MetaData));
+        if(curr->size >= size){
+            curr = split(curr, size);
+            return curr + 1;
         }
+
         out = mergeAdjacentByPriority(((MetaData*)oldp-1), size);
         if(out){
             removeFreeBlock((MetaData*) out);
@@ -560,14 +541,29 @@ void* srealloc(void* oldp, size_t size){
             ((MetaData*)out)->is_free = false;
             return incVoidPtr(out, sizeof(MetaData));
         }
-    }
 
+        curr = mergeAdjacent(curr);
+        if(curr == heapTail){
+            void* tmp = sbrk(size - ((MetaData*)curr)->size);
+            if(tmp == (void*)(-1)){
+                return NULL;
+            }
+            ((MetaData*)curr)->size = size;
+            ((MetaData*)curr)->is_free = false;
+            memcpy((MetaData*)curr+1, oldp, to_copy);
+            return incVoidPtr(curr, sizeof(MetaData));
+        }
+    }
+    if(oldp){
+        ((MetaData*)oldp-1)->is_free = true;
+    }
     out = smalloc(size);
     if(out == NULL){
         return NULL;
     }
     if(was_alloc) {
         memcpy(out, oldp, to_copy);
+        sfree(oldp);
     }
     return out;
 }
