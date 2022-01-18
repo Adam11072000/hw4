@@ -111,7 +111,7 @@ static MetaData* checkWilderness() {
 
 static MetaData* split(MetaData* to_split, size_t size) {
 
-    if (to_split->size - size < min_split) {
+    if (to_split->size - size - sizeof(MetaData) < min_split) {
         return to_split;
     }
 
@@ -538,6 +538,9 @@ void* srealloc(void* oldp, size_t size){
 
         out = mergeAdjacentByPriority(((MetaData*)oldp-1), size);
         if(out){
+            if(((MetaData*)out)->size >= size){
+                out = split((MetaData*)out, size);
+            }
             removeFreeBlock((MetaData*) out);
             memcpy((MetaData*)out+1, oldp, to_copy);
             ((MetaData*)out)->is_free = false;
@@ -552,6 +555,7 @@ void* srealloc(void* oldp, size_t size){
             }
             ((MetaData*)curr)->size = size;
             ((MetaData*)curr)->is_free = false;
+            removeFreeBlock(curr);
             memcpy((MetaData*)curr+1, oldp, to_copy);
             return incVoidPtr(curr, sizeof(MetaData));
         }
