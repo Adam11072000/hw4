@@ -513,12 +513,14 @@ void* srealloc(void* oldp, size_t size){
     if(size >= threshold){
         MetaData* it = (MetaData*)(oldp) - 1;
         if(it->size >= size){
+            it->size = size;
             return oldp;
         }
         removeFromMapped(oldp);
         out = smalloc(size);
         size_t to_copy = size > ((MetaData*)oldp-1)->size ? ((MetaData*)oldp-1)->size : size;
         memcpy(out, oldp, to_copy);
+        munmap(((MetaData*)oldp-1), ((MetaData*)oldp-1)->size + sizeof(MetaData));
         return out;
     }
 
