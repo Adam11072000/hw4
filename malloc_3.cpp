@@ -43,6 +43,41 @@ static void insertToAllocatedList(MetaData* to_insert);
 static void insertToMapped(MetaData* to_insert);
 static void print_memory_list();
 
+MetaData* removeFromAllocatedList(void* target){
+    MetaData* it = heapHead;
+    while(it){
+        if(it == (MetaData*)target){
+            break;
+        }
+        it = it->next;
+    }
+    if(!it){
+        return NULL;
+    }
+    if(it == heapHead){
+        if(heapHead == heapTail){
+            heapHead = NULL;
+            heapTail = NULL;
+        }else{
+            heapHead = it->next;
+            it->next->prev = NULL;
+        }
+        return it;
+    }
+    if(it == heapTail){
+        heapTail = it->prev;
+        heapTail->next = NULL;
+        return it;
+    }
+    if(it->prev){
+        it->prev->next = it->next;
+    }
+    if(it->next){
+        it->next->prev = it->prev;
+    }
+    return it;
+}
+
 static void* incVoidPtr(void* ptr, long int bytes){
     long int to_move = bytes > 0 ? 1 : -1;
 
@@ -75,21 +110,24 @@ static MetaData* checkWilderness() {
     return NULL;
 }
 
-static void split(MetaData** to_split, size_t size){
+static MetaData* split(MetaData* to_split, size_t size) {
 
-    if((*to_split)->size - size < min_split){
-        return;
+    if (to_split->size - size < min_split) {
+        return to_split;
     }
 
-    if((*to_split)->size > size){
-        MetaData* secondHalf = *to_split;
-        secondHalf += 1;
-        secondHalf = (MetaData*)incVoidPtr((void*)secondHalf, size);
-        secondHalf->size = (*to_split)->size - size;
+    if (to_split->size > size) {
+        removeFreeBlock(to_split);
+        int old_size = to_split->size;
+        MetaData *secondHalf = (MetaData *) incVoidPtr((void *)to_split, size);
+        secondHalf->size = old_size - size - sizeof(MetaData);
+        to_split->is_free = false;
+        to_split->size = size;
         secondHalf->is_free = true;
         insertToHist(secondHalf);
-        (*to_split)->size = size;
+        insertToAllocatedList(secondHalf);
     }
+    return to_split;
 }
 
 /** size is def smaller than 128kb */
@@ -127,13 +165,17 @@ static MetaData* findFreeSpace(size_t size){
     MetaData* it = NULL;
     size_t index = -1;
     MetaData* min = NULL;
-
+    bool flag = false;
     for(size_t i = size; i < hist_size*one_kb; i+=one_kb){
+        if(flag){
+            break;
+        }
         it = free_hist[i / one_kb];
         while(it){
             if(it->size >= size && (min == NULL || it < min)){
                 min = it;
                 index = i;
+                flag = true;
                 break; // we won't find a lower address block
             }
             it = it->next_free;
@@ -154,7 +196,7 @@ static MetaData* findFreeSpace(size_t size){
         min->prev_free->next_free = min->next_free;
     }
     if(min->size > size){
-        split(&min, size);
+        min = split(min, size);
     }
     return min;
 }
@@ -200,7 +242,9 @@ static MetaData* removeFreeBlock(MetaData* target){
             return it;
         }
         // def not list head
-        it = it->next_free;
+        if(it) {
+            it = it->next_free;
+        }
         while(it){
             if(it == target){
                 it->prev_free->next_free = it->next_free;
@@ -218,6 +262,7 @@ static MetaData* removeFreeBlock(MetaData* target){
 static void mergeLower(MetaData* target, MetaData* lower){
     removeFreeBlock(lower);
     removeFreeBlock(target);
+    removeFromAllocatedList(target);
     lower->size = lower->size + target->size + sizeof(MetaData);
     insertToHist(lower);
 }
@@ -225,6 +270,7 @@ static void mergeLower(MetaData* target, MetaData* lower){
 static void mergeHigher(MetaData* target, MetaData* upper){
     removeFreeBlock(target);
     removeFreeBlock(upper);
+    removeFromAllocatedList(upper);
     target->size = target->size + upper->size + sizeof(MetaData);
     insertToHist(target);
 }
@@ -233,6 +279,8 @@ static void mergeBoth(MetaData* target, MetaData* lower, MetaData* upper){
     removeFreeBlock(lower);
     removeFreeBlock(target);
     removeFreeBlock(upper);
+    removeFromAllocatedList(target);
+    removeFromAllocatedList(upper);
     lower->size = lower->size + target->size + upper->size + 2*sizeof(MetaData);
     insertToHist(lower);
 }
@@ -260,8 +308,8 @@ static MetaData* mergeAdjacentByPriority(MetaData* target, size_t new_size){
         return lower;
     }
     if(upper && target->size + upper->size >= new_size){
-          mergeHigher(target, upper);
-          return target;
+        mergeHigher(target, upper);
+        return target;
     }
     if(lower && upper && target->size + upper->size + lower->size >= new_size){
         mergeBoth(target,lower,upper);
@@ -287,21 +335,36 @@ void print_hist(){
 
 static void insertToAllocatedList(MetaData* to_insert){
     MetaData* it = heapHead;
-    to_insert->next_free = NULL;
     to_insert->prev_free = NULL;
-    to_insert->next = NULL;
-    to_insert->prev = NULL;
+    to_insert->next_free = NULL;
+    if(!it){
+        to_insert->next = NULL;
+        to_insert->prev = NULL;
+        heapHead = to_insert;
+        heapTail = to_insert;
+        return;
+    }
+    if(to_insert < it){
+        to_insert->next = heapHead;
+        heapHead->prev = to_insert;
+        heapHead = to_insert;
+        return;
+    }
     while(it && it < to_insert){
         it = it->next;
     }
-    if(!heapHead){
-        heapHead = to_insert;
-        heapTail = heapHead;
+    if(!it){
+        heapTail->next = to_insert;
+        to_insert->prev = heapTail;
+        heapTail = to_insert;
         return;
     }
-    heapTail->next = to_insert;
-    to_insert->prev = heapTail;
-    heapTail = to_insert;
+    to_insert->next = it;
+    to_insert->prev = it->prev;
+    if(it->prev){
+        it->prev->next = to_insert;
+    }
+    it->prev = to_insert;
 }
 
 static void insertToMapped(MetaData* to_insert){
@@ -478,9 +541,13 @@ void* srealloc(void* oldp, size_t size){
         // try to use curr block
         while(it){
             if(it + 1 == oldp){
-                if(it->size >= size){
-                    split(&it, size);
-                    return oldp;
+                if(it->size < size){
+                    it->is_free = true;
+                    insertToHist(it);
+                }
+                else{
+                    it = split(it, size);
+                    return it +1;
                 }
                 break;
             }
