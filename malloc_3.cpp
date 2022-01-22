@@ -125,6 +125,7 @@ static MetaData* split(MetaData* to_split, size_t size) {
         secondHalf->is_free = true;
         insertToAllocatedList(secondHalf);
         insertToHist(secondHalf);
+        mergeAdjacent(secondHalf);
     }
     return to_split;
 }
