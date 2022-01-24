@@ -500,7 +500,7 @@ void sfree(void* p) {
     if (p == NULL) {
         return;
     }
-    p = incVoidPtr(p, -roundSize(sizeof(MetaData)))
+    p = incVoidPtr(p, -roundSize(sizeof(MetaData)));
     if(((MetaData*)p)->size < threshold) {
         MetaData *to_insert = getFromAllocatedList(p);
         if (to_insert) {
@@ -638,7 +638,7 @@ size_t _num_allocated_bytes(){
     while(it){
         res += it->size;
         it = it->next;
-    }sizeof(MetaData)
+    }
     return res;
 }
 
